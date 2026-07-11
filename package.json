@@ -1,7 +1,7 @@
 {
-  "name": "padforge",
+  "name": "deltapad",
   "version": "1.0.0",
-  "description": "PADFORGE — свой соунд-пад для ПК",
+  "description": "DeltaPad — свой соунд-пад для ПК",
   "main": "main.js",
   "author": "you",
   "license": "MIT",
@@ -14,8 +14,8 @@
     "electron-builder": "^24.13.3"
   },
   "build": {
-    "appId": "com.yourname.padforge",
-    "productName": "PADFORGE",
+    "appId": "com.yourname.deltapad",
+    "productName": "DeltaPad",
     "files": [
       "main.js",
       "preload.js",
@@ -25,7 +25,7 @@
       "target": "portable"
     },
     "portable": {
-      "artifactName": "PADFORGE-portable.exe"
+      "artifactName": "DeltaPad-portable.exe"
     }
   }
 }
