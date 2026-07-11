@@ -464,12 +464,23 @@ namespace DeltaPad
             RefreshPadsUI();
         }
 
+        private void Log(string msg)
+        {
+            try
+            {
+                File.AppendAllText(Path.Combine(dataDir, "debug.log"),
+                    $"{DateTime.Now:HH:mm:ss.fff} {msg}{Environment.NewLine}");
+            }
+            catch { /* logging must never crash the app */ }
+        }
+
         private WaveStream OpenReader(PadData pad)
         {
             var path = Path.Combine(audioDir, pad.Id + pad.Ext);
-            if (pad.Ext == ".mp3")
-                return new Mp3FileReader(path);
-            return new WaveFileReader(path);
+            Log($"OpenReader: '{pad.Name}' ext={pad.Ext} path={path} exists={File.Exists(path)} size={(File.Exists(path) ? new FileInfo(path).Length : -1)}");
+            WaveStream reader = pad.Ext == ".mp3" ? new Mp3FileReader(path) : new WaveFileReader(path);
+            Log($"OpenReader OK: format={reader.WaveFormat} totalTime={reader.TotalTime} length={reader.Length}");
+            return reader;
         }
 
         private void TriggerPad(string id)
@@ -513,6 +524,7 @@ namespace DeltaPad
             try { reader = OpenReader(pad); }
             catch (Exception ex)
             {
+                Log($"OpenReader FAILED: '{pad.Name}' {ex.GetType().Name}: {ex.Message}");
                 MessageBox.Show($"Не удалось открыть звук \"{pad.Name}\": {ex.Message}");
                 state.IsPlaying = false; RefreshPadsUI();
                 return;
@@ -530,6 +542,7 @@ namespace DeltaPad
 
             output.PlaybackStopped += (s, e) =>
             {
+                Log($"PlaybackStopped: '{pad.Name}' exception={(e.Exception == null ? "none" : e.Exception.GetType().Name + ": " + e.Exception.Message)}");
                 reader.Dispose();
                 output.Dispose();
                 if (IsHandleCreated)
@@ -562,9 +575,10 @@ namespace DeltaPad
                 }
             };
 
-            try { output.Init(waveProvider); output.Play(); }
+            try { output.Init(waveProvider); output.Play(); Log($"output.Play() called OK for '{pad.Name}'"); }
             catch (Exception ex)
             {
+                Log($"output.Init/Play FAILED: '{pad.Name}' {ex.GetType().Name}: {ex.Message}");
                 MessageBox.Show($"Ошибка воспроизведения \"{pad.Name}\": {ex.Message}");
                 state.IsPlaying = false; RefreshPadsUI();
             }
