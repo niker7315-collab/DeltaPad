@@ -230,6 +230,11 @@
   <div class="empty-state" id="emptyState" style="display:none;">Пока нет ни одного пада — нажми «+ Добавить пад» и загрузи звук</div>
 
   <div class="mic-panel">
+    <span class="mic-label">🔊 Устройство вывода</span>
+    <select id="outputSelect"><option value="">Загрузка списка устройств…</option></select>
+  </div>
+
+  <div class="mic-panel">
     <span class="mic-label">🎙 Записать звук с микрофона</span>
     <select id="micSelect"><option value="">Загрузка списка микрофонов…</option></select>
     <button class="record-btn" id="recordBtn"><span class="dot"></span><span id="recordBtnText">Записать</span></button>
@@ -253,8 +258,33 @@
   const MAX_BYTES = 20 * 1024 * 1024; // 20MB per sound — stored as real files on disk now
   let pads = [];       // {id, name, volume, repeat, infinite, mime}
   let audioUrls = {};  // id -> data URL (in-memory, loaded from storage)
-  let playState = {};  // id -> { remaining, isPlaying, currentAudio }
+  let decodedBuffers = {}; // id -> decoded AudioBuffer (own playback engine, not <audio>)
+  let playState = {};  // id -> { remaining, isPlaying, currentSource }
   let pendingPadId = null; // for file input target
+
+  // ---- Own audio engine (Web Audio API) ----
+  let audioCtx = null;
+  function ensureAudioCtx(){
+    if(!audioCtx){
+      audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+    }
+    if(audioCtx.state === 'suspended'){ audioCtx.resume(); }
+    return audioCtx;
+  }
+
+  async function decodeForPad(id, dataUrl){
+    try{
+      const ctx = ensureAudioCtx();
+      const resp = await fetch(dataUrl);
+      const arrayBuffer = await resp.arrayBuffer();
+      const buffer = await ctx.decodeAudioData(arrayBuffer.slice(0));
+      decodedBuffers[id] = buffer;
+      console.log('[DeltaPad] decoded OK', id, 'duration', buffer.duration.toFixed(2) + 's');
+    }catch(e){
+      console.error('[DeltaPad] decode FAILED', id, e);
+      delete decodedBuffers[id];
+    }
+  }
 
   const grid = document.getElementById('grid');
   const overlay = document.getElementById('overlay');
@@ -296,10 +326,13 @@
     }catch(e){ pads = []; }
 
     for(const p of pads){
-      playState[p.id] = { remaining:0, isPlaying:false, currentAudio:null };
+      playState[p.id] = { remaining:0, isPlaying:false, currentSource:null };
       try{
         const dataUrl = await window.padforge.loadAudio(p.id, p.mime || 'audio/mpeg');
-        if(dataUrl) audioUrls[p.id] = dataUrl;
+        if(dataUrl){
+          audioUrls[p.id] = dataUrl;
+          await decodeForPad(p.id, dataUrl);
+        }
       }catch(e){ /* no audio yet or fetch failed */ }
     }
     render();
@@ -375,10 +408,11 @@
       if(fileInput._newPad){
         const p = { id: pendingPadId, name: file.name.replace(/\.[^.]+$/, ''), volume: 80, repeat: 1, infinite: false, mime: file.type || 'audio/mpeg' };
         pads.push(p);
-        playState[p.id] = { remaining:0, isPlaying:false, currentAudio:null };
+        playState[p.id] = { remaining:0, isPlaying:false, currentSource:null };
         audioUrls[p.id] = dataUrl;
         await saveMeta();
         await saveAudio(p.id, dataUrl);
+        await decodeForPad(p.id, dataUrl);
         fileInput._newPad = false;
         render();
         toast('Пад добавлен');
@@ -388,6 +422,7 @@
         audioUrls[pendingPadId] = dataUrl;
         await saveAudio(pendingPadId, dataUrl);
         await saveMeta();
+        await decodeForPad(pendingPadId, dataUrl);
         toast('Звук заменён');
         render();
       }
@@ -406,11 +441,18 @@
       // stop
       state.isPlaying = false;
       state.remaining = 0;
-      if(state.currentAudio){ try{ state.currentAudio.pause(); }catch(e){} }
+      if(state.currentSource){ try{ state.currentSource.stop(); }catch(e){} }
       render();
       return;
     }
 
+    if(!decodedBuffers[id]){
+      toast('Звук ещё не расшифрован — попробуй ещё раз через секунду');
+      decodeForPad(id, audioUrls[id]);
+      return;
+    }
+
+    const ctx = ensureAudioCtx();
     state.isPlaying = true;
     state.remaining = p.infinite ? Infinity : p.repeat;
     render();
@@ -421,29 +463,27 @@
         render();
         return;
       }
-      const audio = new Audio(audioUrls[id]);
-      audio.volume = p.volume / 100;
-      state.currentAudio = audio;
+      const source = ctx.createBufferSource();
+      source.buffer = decodedBuffers[id];
+      const gainNode = ctx.createGain();
+      gainNode.gain.value = p.volume / 100;
+      source.connect(gainNode);
+      gainNode.connect(ctx.destination);
+      state.currentSource = source;
       if(!p.infinite) state.remaining -= 1;
       render();
-      console.log('[DeltaPad] play attempt', { name: p.name, mime: p.mime, srcLength: (audioUrls[id]||'').length });
-      audio.addEventListener('error', () => {
-        const err = audio.error;
-        console.error('[DeltaPad] audio ELEMENT error', { code: err && err.code, message: err && err.message, name: p.name, mime: p.mime });
-        toast('Ошибка воспроизведения: код ' + (err ? err.code : '?'));
-        state.isPlaying = false; render();
-      });
-      audio.addEventListener('canplay', () => console.log('[DeltaPad] canplay ok', p.name));
-      audio.play().then(() => {
-        console.log('[DeltaPad] play() resolved OK', p.name);
-      }).catch((err) => {
-        console.error('[DeltaPad] play() rejected', err, p.name);
-        state.isPlaying = false; render(); toast('Не удалось воспроизвести звук: ' + err.message);
-      });
-      audio.onended = () => {
+
+      console.log('[DeltaPad] starting playback', p.name, 'ctx state:', ctx.state);
+      source.onended = () => {
         if(state.isPlaying && (p.infinite || state.remaining > 0)) playOnce();
         else { state.isPlaying = false; render(); }
       };
+      try{
+        source.start(0);
+      }catch(e){
+        console.error('[DeltaPad] source.start failed', e);
+        state.isPlaying = false; render(); toast('Ошибка запуска звука: ' + e.message);
+      }
     };
     playOnce();
   }
@@ -514,6 +554,7 @@
     drawer.querySelector('#s-delete').addEventListener('click', async () => {
       pads = pads.filter(x => x.id !== id);
       delete audioUrls[id];
+      delete decodedBuffers[id];
       delete playState[id];
       await saveMeta();
       await deleteAudio(id);
@@ -634,10 +675,11 @@
         mime: mediaRecorder.mimeType || 'audio/webm'
       };
       pads.push(p);
-      playState[id] = { remaining:0, isPlaying:false, currentAudio:null };
+      playState[id] = { remaining:0, isPlaying:false, currentSource:null };
       audioUrls[id] = dataUrl;
       await saveMeta();
       await saveAudio(id, dataUrl);
+      await decodeForPad(id, dataUrl);
       render();
       toast('Запись добавлена как новый пад');
     };
@@ -654,6 +696,46 @@
   });
 
   loadAll();
+
+  // ---- Output device selection ----
+  const outputSelect = document.getElementById('outputSelect');
+
+  async function populateOutputList(){
+    try{
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const outputs = devices.filter(d => d.kind === 'audiooutput');
+      if(outputs.length === 0){
+        outputSelect.innerHTML = '<option value="">Устройства не найдены (используется системное по умолчанию)</option>';
+        return;
+      }
+      outputSelect.innerHTML = outputs.map((d, i) =>
+        `<option value="${d.deviceId}">${escapeHtml(d.label || 'Устройство вывода ' + (i + 1))}</option>`
+      ).join('');
+    }catch(e){
+      outputSelect.innerHTML = '<option value="">Не удалось получить список устройств</option>';
+      console.error('[DeltaPad] enumerate output devices failed', e);
+    }
+  }
+  populateOutputList();
+  navigator.mediaDevices.addEventListener && navigator.mediaDevices.addEventListener('devicechange', populateOutputList);
+
+  outputSelect.addEventListener('change', async () => {
+    const deviceId = outputSelect.value;
+    if(!deviceId) return;
+    const ctx = ensureAudioCtx();
+    if(typeof ctx.setSinkId === 'function'){
+      try{
+        await ctx.setSinkId(deviceId);
+        console.log('[DeltaPad] output device switched to', deviceId);
+        toast('Устройство вывода изменено');
+      }catch(e){
+        console.error('[DeltaPad] setSinkId failed', e);
+        toast('Не удалось переключить устройство вывода');
+      }
+    }else{
+      toast('Эта версия не поддерживает переключение устройства из приложения — смени устройство по умолчанию в Windows');
+    }
+  });
 })();
 </script>
 </body>
