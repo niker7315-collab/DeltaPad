@@ -439,7 +439,7 @@ namespace DeltaPad
         {
             var path = Path.Combine(audioDir, pad.Id + pad.Ext);
             if (pad.Ext == ".mp3")
-                return new Mp3FileReader(path, wf => new NLayer.NAudioSupport.Mp3FrameDecompressor(wf));
+                return new Mp3FileReader(path);
             return new WaveFileReader(path);
         }
 
