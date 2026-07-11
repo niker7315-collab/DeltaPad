@@ -426,7 +426,20 @@
       state.currentAudio = audio;
       if(!p.infinite) state.remaining -= 1;
       render();
-      audio.play().catch(() => { state.isPlaying = false; render(); toast('Не удалось воспроизвести звук'); });
+      console.log('[DeltaPad] play attempt', { name: p.name, mime: p.mime, srcLength: (audioUrls[id]||'').length });
+      audio.addEventListener('error', () => {
+        const err = audio.error;
+        console.error('[DeltaPad] audio ELEMENT error', { code: err && err.code, message: err && err.message, name: p.name, mime: p.mime });
+        toast('Ошибка воспроизведения: код ' + (err ? err.code : '?'));
+        state.isPlaying = false; render();
+      });
+      audio.addEventListener('canplay', () => console.log('[DeltaPad] canplay ok', p.name));
+      audio.play().then(() => {
+        console.log('[DeltaPad] play() resolved OK', p.name);
+      }).catch((err) => {
+        console.error('[DeltaPad] play() rejected', err, p.name);
+        state.isPlaying = false; render(); toast('Не удалось воспроизвести звук: ' + err.message);
+      });
       audio.onended = () => {
         if(state.isPlaying && (p.infinite || state.remaining > 0)) playOnce();
         else { state.isPlaying = false; render(); }
