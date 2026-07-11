@@ -335,12 +335,32 @@ namespace DeltaPad
             outputDevices = deviceEnumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active).ToList();
             outputCombo.Items.Clear();
             foreach (var d in outputDevices) outputCombo.Items.Add(d.FriendlyName);
-            if (outputCombo.Items.Count > 0) outputCombo.SelectedIndex = 0;
+
+            // Select the OS-level default playback device, not just the first in the list —
+            // otherwise sound can silently go to an inactive/disconnected device.
+            int defaultIndex = 0;
+            try
+            {
+                var defaultDevice = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Render, Role.Multimedia);
+                var idx = outputDevices.FindIndex(d => d.ID == defaultDevice.ID);
+                if (idx >= 0) defaultIndex = idx;
+            }
+            catch { /* fall back to index 0 */ }
+            if (outputCombo.Items.Count > 0) outputCombo.SelectedIndex = defaultIndex;
 
             inputDevices = deviceEnumerator.EnumerateAudioEndPoints(DataFlow.Capture, DeviceState.Active).ToList();
             micCombo.Items.Clear();
             foreach (var d in inputDevices) micCombo.Items.Add(d.FriendlyName);
-            if (micCombo.Items.Count > 0) micCombo.SelectedIndex = 0;
+
+            int defaultMicIndex = 0;
+            try
+            {
+                var defaultMic = deviceEnumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Multimedia);
+                var idx = inputDevices.FindIndex(d => d.ID == defaultMic.ID);
+                if (idx >= 0) defaultMicIndex = idx;
+            }
+            catch { /* fall back to index 0 */ }
+            if (micCombo.Items.Count > 0) micCombo.SelectedIndex = defaultMicIndex;
         }
 
         private MMDevice GetSelectedOutputDevice()
