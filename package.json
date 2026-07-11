@@ -1,0 +1,31 @@
+{
+  "name": "padforge",
+  "version": "1.0.0",
+  "description": "PADFORGE — свой соунд-пад для ПК",
+  "main": "main.js",
+  "author": "you",
+  "license": "MIT",
+  "scripts": {
+    "start": "electron .",
+    "dist": "electron-builder --win portable"
+  },
+  "devDependencies": {
+    "electron": "^31.0.0",
+    "electron-builder": "^24.13.3"
+  },
+  "build": {
+    "appId": "com.yourname.padforge",
+    "productName": "PADFORGE",
+    "files": [
+      "main.js",
+      "preload.js",
+      "index.html"
+    ],
+    "win": {
+      "target": "portable"
+    },
+    "portable": {
+      "artifactName": "PADFORGE-portable.exe"
+    }
+  }
+}
