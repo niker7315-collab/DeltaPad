@@ -3,11 +3,11 @@ const path = require('path');
 const fs = require('fs');
 
 // Where user data lives. When run as a portable exe, we keep it next to the
-// executable (in a "padforge-data" folder) so the app is truly self-contained
+// executable (in a "deltapad-data" folder) so the app is truly self-contained
 // and portable (no install, no AppData dependency, works from a USB stick).
 function getDataDir() {
   const base = process.env.PORTABLE_EXECUTABLE_DIR || path.dirname(app.getPath('exe'));
-  const dir = path.join(base, 'padforge-data');
+  const dir = path.join(base, 'deltapad-data');
   const audioDir = path.join(dir, 'audio');
   if (!fs.existsSync(audioDir)) fs.mkdirSync(audioDir, { recursive: true });
   return { dir, audioDir };
@@ -23,7 +23,7 @@ function createWindow() {
     minWidth: 640,
     minHeight: 560,
     backgroundColor: '#100e14',
-    title: 'PADFORGE',
+    title: 'DeltaPad',
     webPreferences: {
       preload: path.join(__dirname, 'preload.js'),
       contextIsolation: true,
