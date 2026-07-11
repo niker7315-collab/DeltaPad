@@ -478,7 +478,16 @@ namespace DeltaPad
         {
             var path = Path.Combine(audioDir, pad.Id + pad.Ext);
             Log($"OpenReader: '{pad.Name}' ext={pad.Ext} path={path} exists={File.Exists(path)} size={(File.Exists(path) ? new FileInfo(path).Length : -1)}");
-            WaveStream reader = pad.Ext == ".mp3" ? new Mp3FileReader(path) : new WaveFileReader(path);
+            WaveStream reader;
+            if (pad.Ext == ".mp3")
+            {
+                var stream = File.OpenRead(path);
+                reader = new Mp3FileReader(stream, wf => new NLayer.NAudioSupport.Mp3FrameDecompressor(wf));
+            }
+            else
+            {
+                reader = new WaveFileReader(path);
+            }
             Log($"OpenReader OK: format={reader.WaveFormat} totalTime={reader.TotalTime} length={reader.Length}");
             return reader;
         }
