@@ -32,6 +32,13 @@ function createWindow() {
   });
   Menu.setApplicationMenu(null); // clean window, no browser-like menu bar
   win.loadFile('index.html');
+
+  // Restore the DevTools shortcut (removed along with the default menu above)
+  win.webContents.on('before-input-event', (event, input) => {
+    if (input.control && input.shift && input.key.toLowerCase() === 'i') {
+      win.webContents.toggleDevTools();
+    }
+  });
 }
 
 app.whenReady().then(() => {
