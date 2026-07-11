@@ -309,6 +309,15 @@ namespace DeltaPad
             outputCombo = new ComboBox { Location = new Point(135, 521), Size = new Size(260, 26), DropDownStyle = ComboBoxStyle.DropDownList };
             Controls.Add(outputCombo);
 
+            var testToneBtn = new Button
+            {
+                Text = "🔔 Тестовый тон", Location = new Point(405, 519), Size = new Size(140, 30),
+                BackColor = Color.FromArgb(0x22, 0x1E, 0x29), ForeColor = Color.FromArgb(0x45, 0xC9, 0xB0),
+                FlatStyle = FlatStyle.Flat
+            };
+            testToneBtn.Click += TestToneBtn_Click;
+            Controls.Add(testToneBtn);
+
             var footer = new Label
             {
                 Text = "Клик — играть · шестерёнка — настройки · клавиши 1-9,0,Q...M — быстрый доступ",
@@ -527,6 +536,15 @@ namespace DeltaPad
                 {
                     BeginInvoke(new Action(() =>
                     {
+                        if (e.Exception != null)
+                        {
+                            MessageBox.Show(
+                                "Ошибка воспроизведения (\"" + pad.Name + "\"):\n\n" + e.Exception.GetType().Name + "\n" + e.Exception.Message,
+                                "DeltaPad — ошибка звука");
+                            state.IsPlaying = false;
+                            RefreshPadsUI();
+                            return;
+                        }
                         if (state.ManualStop)
                         {
                             state.IsPlaying = false;
@@ -652,6 +670,35 @@ namespace DeltaPad
             recordBtn.Text = "● Записать";
             recordingPadId = null;
             try { capture?.StopRecording(); } catch { /* ignore */ }
+        }
+
+        private void TestToneBtn_Click(object? sender, EventArgs e)
+        {
+            try
+            {
+                var device = GetSelectedOutputDevice();
+                var signal = new SignalGenerator(44100, 1) { Type = SignalGeneratorType.Sin, Frequency = 440, Gain = 0.4 };
+                var waveProvider = signal.Take(TimeSpan.FromSeconds(1)).ToWaveProvider();
+                var output = new WasapiOut(device, AudioClientShareMode.Shared, true, 100);
+                output.PlaybackStopped += (s, ev) =>
+                {
+                    output.Dispose();
+                    if (ev.Exception != null && IsHandleCreated)
+                    {
+                        BeginInvoke(new Action(() =>
+                            MessageBox.Show("Тестовый тон — ошибка:\n\n" + ev.Exception.GetType().Name + "\n" + ev.Exception.Message,
+                                "DeltaPad — ошибка звука")));
+                    }
+                };
+                output.Init(waveProvider);
+                output.Play();
+                MessageBox.Show("Тон должен проиграться прямо сейчас (1 секунда, 440 Гц) через устройство:\n" + device.FriendlyName,
+                    "DeltaPad — тест");
+            }
+            catch (Exception ex)
+            {
+                MessageBox.Show("Не удалось запустить тестовый тон:\n\n" + ex.GetType().Name + "\n" + ex.Message, "DeltaPad — ошибка");
+            }
         }
 
         private void MainForm_KeyDown(object? sender, KeyEventArgs e)
