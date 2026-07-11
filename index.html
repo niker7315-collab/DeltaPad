@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>PADFORGE</title>
+<title>DeltaPad</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;700&display=swap" rel="stylesheet">
 <style>
@@ -174,6 +174,37 @@
 
   .empty-state{ text-align:center; margin-top:60px; color:var(--text-faint); font-family:var(--font-mono); font-size:12px; }
   footer{ margin-top:34px; text-align:center; font-family:var(--font-mono); font-size:11px; color:var(--text-faint); }
+
+  .mic-panel{
+    margin-top:30px; padding:18px 20px; border-radius:16px;
+    background:linear-gradient(145deg, var(--panel-2), var(--panel));
+    border:1px solid var(--pad-border);
+    display:flex; align-items:center; gap:16px; flex-wrap:wrap;
+  }
+  .mic-panel .mic-label{
+    font-family:var(--font-mono); font-size:11px; color:var(--text-dim);
+    text-transform:uppercase; letter-spacing:1px; white-space:nowrap;
+  }
+  .mic-panel select{
+    flex:1; min-width:180px; padding:10px 12px; border-radius:9px;
+    border:1px solid var(--pad-border); background:var(--pad); color:var(--text);
+    font-family:var(--font-body); font-size:13.5px;
+  }
+  .mic-panel select:focus{ outline:none; border-color:var(--brass-dim); }
+  .record-btn{
+    display:flex; align-items:center; gap:8px; font-family:var(--font-body); font-weight:600;
+    font-size:13.5px; padding:10px 16px; border-radius:10px; border:1px solid var(--danger);
+    background:transparent; color:var(--danger); cursor:pointer; transition:all .15s ease; white-space:nowrap;
+  }
+  .record-btn:hover{ background:rgba(225,87,61,0.1); }
+  .record-btn.recording{ background:var(--danger); color:#1a0a08; }
+  .record-btn .dot{
+    width:9px; height:9px; border-radius:50%; background:var(--danger); flex-shrink:0;
+  }
+  .record-btn.recording .dot{ background:#1a0a08; animation:pulse 1s infinite ease-in-out; }
+  @keyframes pulse{ 0%,100%{ opacity:1; } 50%{ opacity:0.3; } }
+  .rec-timer{ font-family:var(--font-mono); font-size:13px; color:var(--text-dim); min-width:48px; }
+
   .toast{
     position:fixed; bottom:22px; left:50%; transform:translateX(-50%);
     background:var(--panel); border:1px solid var(--pad-border); color:var(--text);
@@ -187,7 +218,7 @@
 <div class="wrap">
   <header>
     <div>
-      <div class="brand-mark"><span class="led"></span><h1>PAD<span>FORGE</span></h1></div>
+      <div class="brand-mark"><span class="led"></span><h1>DELTA<span>PAD</span></h1></div>
       <div class="tagline">твои звуки · без лимитов · без подписки</div>
     </div>
     <div class="global-controls">
@@ -197,6 +228,13 @@
 
   <div class="grid" id="grid"></div>
   <div class="empty-state" id="emptyState" style="display:none;">Пока нет ни одного пада — нажми «+ Добавить пад» и загрузи звук</div>
+
+  <div class="mic-panel">
+    <span class="mic-label">🎙 Записать звук с микрофона</span>
+    <select id="micSelect"><option value="">Загрузка списка микрофонов…</option></select>
+    <button class="record-btn" id="recordBtn"><span class="dot"></span><span id="recordBtnText">Записать</span></button>
+    <span class="rec-timer" id="recTimer">00:00</span>
+  </div>
 
   <footer>Клик — играть · шестерёнка — настройки громкости и повторов · esc — закрыть окно</footer>
 </div>
@@ -494,6 +532,113 @@
   });
 
   document.getElementById('addPadBtn').addEventListener('click', addPad);
+
+  // ---- Microphone recording ----
+  const micSelect = document.getElementById('micSelect');
+  const recordBtn = document.getElementById('recordBtn');
+  const recordBtnText = document.getElementById('recordBtnText');
+  const recTimer = document.getElementById('recTimer');
+  let mediaRecorder = null;
+  let recordedChunks = [];
+  let recTimerInterval = null;
+  let recSeconds = 0;
+  let recordingStream = null;
+  let recordCounter = 1;
+
+  async function populateMicList(){
+    try{
+      const devices = await navigator.mediaDevices.enumerateDevices();
+      const mics = devices.filter(d => d.kind === 'audioinput');
+      if(mics.length === 0){
+        micSelect.innerHTML = '<option value="">Микрофоны не найдены</option>';
+        return;
+      }
+      micSelect.innerHTML = mics.map((m, i) =>
+        `<option value="${m.deviceId}">${escapeHtml(m.label || 'Микрофон ' + (i + 1))}</option>`
+      ).join('');
+    }catch(e){
+      micSelect.innerHTML = '<option value="">Не удалось получить список микрофонов</option>';
+    }
+  }
+
+  // Device labels are only available after permission is granted at least once.
+  async function ensureMicPermissionThenList(){
+    try{
+      const tmp = await navigator.mediaDevices.getUserMedia({ audio: true });
+      tmp.getTracks().forEach(t => t.stop());
+    }catch(e){ /* user may deny; list will just show generic labels */ }
+    await populateMicList();
+  }
+  ensureMicPermissionThenList();
+  navigator.mediaDevices.addEventListener && navigator.mediaDevices.addEventListener('devicechange', populateMicList);
+
+  function formatTimer(sec){
+    const m = String(Math.floor(sec / 60)).padStart(2, '0');
+    const s = String(sec % 60).padStart(2, '0');
+    return `${m}:${s}`;
+  }
+
+  recordBtn.addEventListener('click', async () => {
+    if(mediaRecorder && mediaRecorder.state === 'recording'){
+      mediaRecorder.stop();
+      return;
+    }
+    const deviceId = micSelect.value;
+    if(!deviceId){ toast('Выбери микрофон из списка'); return; }
+
+    try{
+      recordingStream = await navigator.mediaDevices.getUserMedia({
+        audio: { deviceId: { exact: deviceId } }
+      });
+    }catch(e){
+      toast('Не удалось получить доступ к микрофону');
+      return;
+    }
+
+    recordedChunks = [];
+    mediaRecorder = new MediaRecorder(recordingStream);
+    mediaRecorder.ondataavailable = (e) => { if(e.data.size > 0) recordedChunks.push(e.data); };
+    mediaRecorder.onstop = async () => {
+      recordingStream.getTracks().forEach(t => t.stop());
+      clearInterval(recTimerInterval);
+      recordBtn.classList.remove('recording');
+      recordBtnText.textContent = 'Записать';
+      recTimer.textContent = '00:00';
+      recSeconds = 0;
+
+      if(recordedChunks.length === 0){ toast('Запись пустая'); return; }
+      const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType || 'audio/webm' });
+      const dataUrl = await new Promise((resolve, reject) => {
+        const reader = new FileReader();
+        reader.onload = () => resolve(reader.result);
+        reader.onerror = reject;
+        reader.readAsDataURL(blob);
+      });
+
+      const id = uid();
+      const p = {
+        id, name: 'Запись ' + recordCounter++, volume: 80, repeat: 1, infinite: false,
+        mime: mediaRecorder.mimeType || 'audio/webm'
+      };
+      pads.push(p);
+      playState[id] = { remaining:0, isPlaying:false, currentAudio:null };
+      audioUrls[id] = dataUrl;
+      await saveMeta();
+      await saveAudio(id, dataUrl);
+      render();
+      toast('Запись добавлена как новый пад');
+    };
+
+    mediaRecorder.start();
+    recordBtn.classList.add('recording');
+    recordBtnText.textContent = 'Стоп';
+    recSeconds = 0;
+    recTimer.textContent = '00:00';
+    recTimerInterval = setInterval(() => {
+      recSeconds++;
+      recTimer.textContent = formatTimer(recSeconds);
+    }, 1000);
+  });
 
   loadAll();
 })();
