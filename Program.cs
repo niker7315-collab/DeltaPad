@@ -28,7 +28,32 @@ namespace DeltaPad
         public int Remaining;
         public bool ManualStop;
         public WasapiOut? Output;
-        public WaveStream? Reader;
+        public IDisposable? Source;
+    }
+
+    /// <summary>
+    /// Reads MP3 files using the pure-managed NLayer decoder directly, bypassing
+    /// NAudio's built-in Mp3FileReader (which depends on the Windows ACM codec —
+    /// unreliable on stripped-down Windows installs). This has no dependency on
+    /// any system-installed audio codec.
+    /// </summary>
+    public class NLayerMp3SampleProvider : ISampleProvider, IDisposable
+    {
+        private readonly NLayer.MpegFile mpegFile;
+        public WaveFormat WaveFormat { get; }
+
+        public NLayerMp3SampleProvider(string path)
+        {
+            mpegFile = new NLayer.MpegFile(path);
+            WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(mpegFile.SampleRate, mpegFile.Channels);
+        }
+
+        public int Read(float[] buffer, int offset, int count)
+        {
+            return mpegFile.ReadSamples(buffer, offset, count);
+        }
+
+        public void Dispose() => mpegFile.Dispose();
     }
 
     internal static class Program
@@ -474,22 +499,23 @@ namespace DeltaPad
             catch { /* logging must never crash the app */ }
         }
 
-        private WaveStream OpenReader(PadData pad)
+        private (ISampleProvider sampleProvider, IDisposable source) OpenSampleSource(PadData pad)
         {
             var path = Path.Combine(audioDir, pad.Id + pad.Ext);
-            Log($"OpenReader: '{pad.Name}' ext={pad.Ext} path={path} exists={File.Exists(path)} size={(File.Exists(path) ? new FileInfo(path).Length : -1)}");
-            WaveStream reader;
+            Log($"OpenSampleSource: '{pad.Name}' ext={pad.Ext} path={path} exists={File.Exists(path)} size={(File.Exists(path) ? new FileInfo(path).Length : -1)}");
+
             if (pad.Ext == ".mp3")
             {
-                var stream = File.OpenRead(path);
-                reader = new Mp3FileReader(stream, wf => new NLayer.NAudioSupport.Mp3FrameDecompressor(wf));
+                var mp3 = new NLayerMp3SampleProvider(path);
+                Log($"OpenSampleSource OK (NLayer mp3): format={mp3.WaveFormat}");
+                return (mp3, mp3);
             }
             else
             {
-                reader = new WaveFileReader(path);
+                var waveReader = new WaveFileReader(path);
+                Log($"OpenSampleSource OK (wav): format={waveReader.WaveFormat} totalTime={waveReader.TotalTime}");
+                return (waveReader.ToSampleProvider(), waveReader);
             }
-            Log($"OpenReader OK: format={reader.WaveFormat} totalTime={reader.TotalTime} length={reader.Length}");
-            return reader;
         }
 
         private void TriggerPad(string id)
@@ -529,30 +555,30 @@ namespace DeltaPad
                 return;
             }
 
-            WaveStream reader;
-            try { reader = OpenReader(pad); }
+            ISampleProvider sampleProvider;
+            IDisposable source;
+            try { (sampleProvider, source) = OpenSampleSource(pad); }
             catch (Exception ex)
             {
-                Log($"OpenReader FAILED: '{pad.Name}' {ex.GetType().Name}: {ex.Message}");
+                Log($"OpenSampleSource FAILED: '{pad.Name}' {ex.GetType().Name}: {ex.Message}");
                 MessageBox.Show($"Не удалось открыть звук \"{pad.Name}\": {ex.Message}");
                 state.IsPlaying = false; RefreshPadsUI();
                 return;
             }
 
-            var sampleProvider = reader.ToSampleProvider();
             var volumeProvider = new VolumeSampleProvider(sampleProvider) { Volume = pad.Volume / 100f };
             var waveProvider = volumeProvider.ToWaveProvider();
 
             var device = GetSelectedOutputDevice();
             var output = new WasapiOut(device, AudioClientShareMode.Shared, true, 100);
-            state.Reader = reader;
+            state.Source = source;
             state.Output = output;
             if (!pad.Infinite) state.Remaining -= 1;
 
             output.PlaybackStopped += (s, e) =>
             {
                 Log($"PlaybackStopped: '{pad.Name}' exception={(e.Exception == null ? "none" : e.Exception.GetType().Name + ": " + e.Exception.Message)}");
-                reader.Dispose();
+                source.Dispose();
                 output.Dispose();
                 if (IsHandleCreated)
                 {
