@@ -555,7 +555,7 @@ namespace DeltaPad
             }
             catch (Exception ex)
             {
-                Log($"DumpMp3ForDebug FAILED: {ex.GetType().Name}: {ex.Message}");
+                Log($"DumpMp3ForDebug FAILED: {ex}");
             }
         }
 
@@ -621,7 +621,7 @@ namespace DeltaPad
             try { (sampleProvider, source) = OpenSampleSource(pad); }
             catch (Exception ex)
             {
-                Log($"OpenSampleSource FAILED: '{pad.Name}' {ex.GetType().Name}: {ex.Message}");
+                Log($"OpenSampleSource FAILED: '{pad.Name}' {ex}");
                 MessageBox.Show($"Не удалось открыть звук \"{pad.Name}\": {ex.Message}");
                 state.IsPlaying = false; RefreshPadsUI();
                 return;
@@ -648,8 +648,9 @@ namespace DeltaPad
                     {
                         if (e.Exception != null)
                         {
+                            Log($"FULL EXCEPTION STACK for '{pad.Name}':\n{e.Exception}");
                             MessageBox.Show(
-                                "Ошибка воспроизведения (\"" + pad.Name + "\"):\n\n" + e.Exception.GetType().Name + "\n" + e.Exception.Message,
+                                "Ошибка воспроизведения (\"" + pad.Name + "\"):\n\n" + e.Exception,
                                 "DeltaPad — ошибка звука");
                             state.IsPlaying = false;
                             RefreshPadsUI();
@@ -675,7 +676,7 @@ namespace DeltaPad
             try { output.Init(waveProvider); output.Play(); Log($"output.Play() called OK for '{pad.Name}'"); }
             catch (Exception ex)
             {
-                Log($"output.Init/Play FAILED: '{pad.Name}' {ex.GetType().Name}: {ex.Message}");
+                Log($"output.Init/Play FAILED: '{pad.Name}' {ex}");
                 MessageBox.Show($"Ошибка воспроизведения \"{pad.Name}\": {ex.Message}");
                 state.IsPlaying = false; RefreshPadsUI();
             }
