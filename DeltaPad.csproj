@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <PackageReference Include="NAudio" Version="2.2.1" />
+    <PackageReference Include="NLayer" Version="1.16.0" />
   </ItemGroup>
 
 </Project>
