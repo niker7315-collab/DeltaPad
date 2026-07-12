@@ -32,11 +32,26 @@ namespace DeltaPad
     }
 
     /// <summary>
-    /// Reads MP3 files using the pure-managed NLayer decoder directly, bypassing
-    /// NAudio's built-in Mp3FileReader (which depends on the Windows ACM codec —
-    /// unreliable on stripped-down Windows installs). This has no dependency on
-    /// any system-installed audio codec.
+    /// Diagnostic wrapper: measures the peak absolute sample value passing through,
+    /// so we can tell whether a decoder is producing real audio or silence.
     /// </summary>
+    public class PeakTrackingSampleProvider : ISampleProvider
+    {
+        private readonly ISampleProvider source;
+        public float Peak { get; private set; }
+        public WaveFormat WaveFormat => source.WaveFormat;
+        public PeakTrackingSampleProvider(ISampleProvider source) { this.source = source; }
+        public int Read(float[] buffer, int offset, int count)
+        {
+            int read = source.Read(buffer, offset, count);
+            for (int i = 0; i < read; i++)
+            {
+                var abs = Math.Abs(buffer[offset + i]);
+                if (abs > Peak) Peak = abs;
+            }
+            return read;
+        }
+    }
     public class NLayerMp3SampleProvider : ISampleProvider, IDisposable
     {
         private readonly NLayer.MpegFile mpegFile;
@@ -566,7 +581,8 @@ namespace DeltaPad
                 return;
             }
 
-            var volumeProvider = new VolumeSampleProvider(sampleProvider) { Volume = pad.Volume / 100f };
+            var peakTracker = new PeakTrackingSampleProvider(sampleProvider);
+            var volumeProvider = new VolumeSampleProvider(peakTracker) { Volume = pad.Volume / 100f };
             var waveProvider = volumeProvider.ToWaveProvider();
 
             var device = GetSelectedOutputDevice();
@@ -577,7 +593,7 @@ namespace DeltaPad
 
             output.PlaybackStopped += (s, e) =>
             {
-                Log($"PlaybackStopped: '{pad.Name}' exception={(e.Exception == null ? "none" : e.Exception.GetType().Name + ": " + e.Exception.Message)}");
+                Log($"PlaybackStopped: '{pad.Name}' peak={peakTracker.Peak:F5} exception={(e.Exception == null ? "none" : e.Exception.GetType().Name + ": " + e.Exception.Message)}");
                 source.Dispose();
                 output.Dispose();
                 if (IsHandleCreated)
