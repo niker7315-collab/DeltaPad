@@ -514,6 +514,25 @@ namespace DeltaPad
             catch { /* logging must never crash the app */ }
         }
 
+        private void DumpMp3ForDebug(string mp3Path)
+        {
+            try
+            {
+                var dumpPath = Path.Combine(dataDir, "debug_dump.wav");
+                using var mpeg = new NLayer.MpegFile(mp3Path);
+                var wf = WaveFormat.CreateIeeeFloatWaveFormat(mpeg.SampleRate, mpeg.Channels);
+                using var writer = new WaveFileWriter(dumpPath, wf);
+                var buffer = new float[mpeg.SampleRate * mpeg.Channels * 5]; // ~5 seconds
+                int read = mpeg.ReadSamples(buffer, 0, buffer.Length);
+                writer.WriteSamples(buffer, 0, read);
+                Log($"DumpMp3ForDebug: wrote {read} samples (~{(double)read / (mpeg.SampleRate * mpeg.Channels):F2}s) to {dumpPath}");
+            }
+            catch (Exception ex)
+            {
+                Log($"DumpMp3ForDebug FAILED: {ex.GetType().Name}: {ex.Message}");
+            }
+        }
+
         private (ISampleProvider sampleProvider, IDisposable source) OpenSampleSource(PadData pad)
         {
             var path = Path.Combine(audioDir, pad.Id + pad.Ext);
@@ -521,6 +540,7 @@ namespace DeltaPad
 
             if (pad.Ext == ".mp3")
             {
+                DumpMp3ForDebug(path);
                 var mp3 = new NLayerMp3SampleProvider(path);
                 Log($"OpenSampleSource OK (NLayer mp3): format={mp3.WaveFormat}");
                 return (mp3, mp3);
