@@ -57,15 +57,41 @@ namespace DeltaPad
         private readonly NLayer.MpegFile mpegFile;
         public WaveFormat WaveFormat { get; }
 
+        // NLayer misbehaves when asked for many small/frequent reads (as WASAPI does) —
+        // it works correctly when read in large chunks (proven by the debug wav dump).
+        // So we always pull ~1 second at a time from NLayer into this internal buffer,
+        // and serve the caller's smaller requested chunks from here.
+        private readonly float[] internalBuffer;
+        private int internalBufferLength;
+        private int internalBufferPos;
+
         public NLayerMp3SampleProvider(string path)
         {
             mpegFile = new NLayer.MpegFile(path);
             WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(mpegFile.SampleRate, mpegFile.Channels);
+            internalBuffer = new float[Math.Max(mpegFile.SampleRate * mpegFile.Channels, 4096)];
+            internalBufferLength = 0;
+            internalBufferPos = 0;
         }
 
         public int Read(float[] buffer, int offset, int count)
         {
-            return mpegFile.ReadSamples(buffer, offset, count);
+            int totalWritten = 0;
+            while (totalWritten < count)
+            {
+                if (internalBufferPos >= internalBufferLength)
+                {
+                    internalBufferLength = mpegFile.ReadSamples(internalBuffer, 0, internalBuffer.Length);
+                    internalBufferPos = 0;
+                    if (internalBufferLength <= 0) break; // genuine end of stream
+                }
+                int available = internalBufferLength - internalBufferPos;
+                int toCopy = Math.Min(available, count - totalWritten);
+                Array.Copy(internalBuffer, internalBufferPos, buffer, offset + totalWritten, toCopy);
+                internalBufferPos += toCopy;
+                totalWritten += toCopy;
+            }
+            return totalWritten;
         }
 
         public void Dispose() => mpegFile.Dispose();
