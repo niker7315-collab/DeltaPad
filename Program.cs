@@ -87,7 +87,10 @@ namespace DeltaPad
                 }
                 int available = internalBufferLength - internalBufferPos;
                 int toCopy = Math.Min(available, count - totalWritten);
-                Array.Copy(internalBuffer, internalBufferPos, buffer, offset + totalWritten, toCopy);
+                for (int i = 0; i < toCopy; i++)
+                {
+                    buffer[offset + totalWritten + i] = internalBuffer[internalBufferPos + i];
+                }
                 internalBufferPos += toCopy;
                 totalWritten += toCopy;
             }
